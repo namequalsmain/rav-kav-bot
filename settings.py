@@ -1,0 +1,4 @@
+BOT_TOKEN = 'MTQ0NzMyMTk4NDE2ODg4NjMxMw.GcmSSJ.Qdbc84eTni1Tgt5umVZdJfLqPVaLY6VSChvA1E'
+
+DB_PASS = 'aah09XD3hlhMStLj'
+DB_USERNAME = 'kontratop_db_user'
