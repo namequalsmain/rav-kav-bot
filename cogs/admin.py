@@ -97,7 +97,10 @@ class ManualXPModal(ui.Modal, title="Ручная корректировка XP"
                 for lvl in range(user_data['level'], len(LEVELS)):
                     lvl_data = LEVELS[lvl]
                     if lvl_data['exp_need'] <= new_xp and lvl != 30:
-                        pass
+                        print(f'Уровень: {lvl}, нужно: {lvl_data['exp_need']}XP')
+                        print(f'Установлено новое значение xp: {new_xp}')
+                        print(f'Установленное XP больше необходимого {lvl_data['exp_need'] <= new_xp}')
+                        print(f'lvl != 30: {lvl != 30}')
                     else:
                         await db.update_user(self.target_user.id, {"level": lvl})
          
