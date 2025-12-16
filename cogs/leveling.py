@@ -227,7 +227,7 @@ class Leveling(commands.Cog):
 
             file = discord.File(fp=buffer, filename="roadmap.png")
             view = RoadmapPagination(interaction.user, page, user)
-            await interaction.followup.send(file=file, view=view)
+            await interaction.followup.send(file=file, view=view, ephemeral=True)
             log("Сообщение отправлено!", level="SUCCESS")
 
         except Exception as e:
