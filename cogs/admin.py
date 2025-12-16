@@ -92,7 +92,7 @@ class ManualXPModal(ui.Modal, title="Ручная корректировка XP"
 
             current_xp = user_data.get('xp', 0)
             new_xp = max(0, current_xp + amount)
-            exp_need = LEVELS[user_data['level'] + 1]['exp_need'] if (user_data['level'] + 1) in LEVELS else None
+            exp_need = LEVELS[user_data['level']]['exp_need'] if (user_data['level'] + 1) in LEVELS else None
             if new_xp >= exp_need and exp_need is not None:
                 for lvl in range(user_data['level'], len(LEVELS)):
                     lvl_data = LEVELS[lvl]
