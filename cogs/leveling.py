@@ -4,6 +4,7 @@ import traceback
 from discord.ext import commands, tasks
 from discord import app_commands
 from database import db
+import asyncio
 from settings import LEVELS, CHANNEL_ID
 from utils.generator import Generator, generate_image_in_thread
 from utils.ui import RoadmapPagination, BattlepassView
@@ -17,6 +18,66 @@ class Leveling(commands.Cog):
 
     def cog_unload(self):
         self.check_voice_xp.cancel()
+
+    # --- НОВЫЙ МЕТОД: СОХРАНЕНИЕ ПЕРЕД ВЫКЛЮЧЕНИЕМ ---
+    async def save_all_sessions(self):
+        """Сохраняет прогресс всех, кто сейчас в войсе, и очищает сессии"""
+        if not self.voice_sessions:
+            log("Нет активных голосовых сессий для сохранения.", level="INFO")
+            return
+
+        log(f"💾 Сохранение {len(self.voice_sessions)} активных сессий перед выключением...", level="WARN")
+        
+        now = time.time()
+        tasks = []
+
+        # Пробегаем по всем активным сессиям
+        for user_id, start_time in list(self.voice_sessions.items()):
+            duration = now - start_time
+            xp_gained = int(duration / 60 * 10)
+            if xp_gained > 0:
+                # Находим объект участника (чтобы знать имя)
+                guild = self.bot.get_guild(self.bot.guild_id) 
+                member = guild.get_member(user_id) if guild else None
+                
+                # Добавляем задачу сохранения в список
+                tasks.append(self.add_xp(member or user_id, xp_gained))
+                log(f"💾 Сохранен прогресс: ID {user_id} (+{xp_gained} XP)", level="DEBUG")
+
+        # Выполняем все сохранения параллельно
+        if tasks:
+            await asyncio.gather(*tasks)
+        
+        self.voice_sessions.clear()
+        log("✅ Все сессии успешно сохранены.", level="SUCCESS")
+
+    # --- НОВЫЙ МЕТОД: СКАНИРОВАНИЕ ПРИ ЗАПУСКЕ ---
+    @commands.Cog.listener()
+    async def on_ready(self):
+        """Сканирует каналы при запуске и возобновляет сессии"""
+        if self.scanned_on_startup: return
+        
+        log("🔄 Сканирование голосовых каналов...", level="INFO")
+        count = 0
+        now = time.time()
+
+        for guild in self.bot.guilds:
+            for channel in guild.voice_channels:
+                for member in channel.members:
+                    if member.bot: continue
+                    
+                    # Проверяем условия (мут/деф)
+                    is_muted = member.self_mute or member.self_deaf or member.mute or member.deaf
+                    
+                    if not is_muted:
+                        self.voice_sessions[member.id] = now
+                        count += 1
+        
+        self.scanned_on_startup = True
+        if count > 0:
+            log(f"✅ Восстановлено сессий: {count}", level="SUCCESS")
+        else:
+            log("Никто не сидит в войсе.", level="INFO")
 
     @commands.Cog.listener()
     async def on_voice_state_update(self, member, before, after):
