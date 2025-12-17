@@ -307,7 +307,7 @@ class ProfileView(ui.View):
             await interaction.followup.send(file=file, view=view, ephemeral=True)
 
     # 3. Кнопка Поддержка (Уникальная для профиля)
-    @ui.button(label="Поддержка", style=discord.ButtonStyle.success, emoji="🆘", row=1)
+    @ui.button(label="Поддержка", style=discord.ButtonStyle.success, emoji="⚙️🛠️", row=0)
     async def support_btn(self, interaction: discord.Interaction, button: ui.Button):
         if interaction.user.id != self.user_id:
             return await interaction.response.send_message("Вы не можете писать в поддержку за другого человека.", ephemeral=True)
