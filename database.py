@@ -20,7 +20,8 @@ class DatabaseManager:
             "level": 0,
             "rank": "Новичок",
             "inventory": {},
-            "rewards_claimed": [0]
+            "rewards_claimed": [0],
+            "settings": {"lang": "ru", "ephermal": True},
         }
         try:
             await self.users.insert_one(new_user)
@@ -39,6 +40,31 @@ class DatabaseManager:
             {"$inc": {f"inventory.{item_id}": amount}},
             upsert=True
         )
+    async def toggle_setting(self, user_id, setting_key):
+        """Переключает настройку (True <-> False) и возвращает новое состояние"""
+        user = await self.find_user(user_id)
+        
+        # Получаем текущие настройки (по умолчанию пустой словарь)
+        settings = user.get("settings", {})
+        
+        # Инвертируем значение (если настройки нет, считаем что она была True, ставим False, или наоборот)
+        # Давай договоримся: по умолчанию все True (включено).
+        # Значит, если ключа нет -> ставим False. Если есть True -> False.
+        current_value = settings.get(setting_key, True) 
+        new_value = not current_value
+        
+        # Обновляем вложенное поле через dot notation
+        await self.users.update_one(
+            {"_id": user_id},
+            {"$set": {f"settings.{setting_key}": new_value}}
+        )
+        
+        return new_value
 
+    async def get_settings(self, user_id):
+        """Возвращает словарь настроек"""
+        user = await self.find_user(user_id)
+        if not user: return {}
+        return user.get("settings", {})
 # Создаем экземпляр, который будем импортировать в других файлах
 db = DatabaseManager()

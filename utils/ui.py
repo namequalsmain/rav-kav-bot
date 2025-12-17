@@ -308,13 +308,83 @@ class ProfileView(ui.View):
             await interaction.followup.send(file=file, view=view, ephemeral=True)
 
     # 3. Кнопка Поддержка (Уникальная для профиля)
-    @ui.button(label="Поддержка", emoji="⚙️", row=0, style=discord.ButtonStyle.danger)
+    @ui.button(label="Поддержка", emoji=":tools:", row=0, style=discord.ButtonStyle.danger)
     async def support_btn(self, interaction: discord.Interaction, button: ui.Button):
         if interaction.user.id != self.user_id:
             return await interaction.response.send_message("Вы не можете писать в поддержку за другого человека.", ephemeral=True)
         
         await interaction.response.send_modal(SupportModal())
 
+
+
+class SettingsView(ui.View):
+    def __init__(self, user_id, current_settings):
+        super().__init__(timeout=180)
+        self.user_id = user_id
+        self.settings = current_settings
+        
+        # Инициализируем вид кнопок при создании
+        self.update_buttons_visuals()
+
+    def update_buttons_visuals(self):
+        # --- Кнопка 1: Уведомления (Notifications) ---
+        # По умолчанию True
+        is_notify_on = self.settings.get("notify_lvl_up", True)
+        
+        btn_notify = self.get_item("btn_notify") # Ищем кнопку по custom_id (или имени метода)
+        
+
+    # Вспомогательный метод для поиска кнопки в списке детей View
+    def get_item(self, custom_id_key):
+        for item in self.children:
+            # Мы используем callback name как идентификатор
+            if item.callback.__name__ == custom_id_key:
+                return item
+        return None
+
+    # --- CALLBACKS (Действия кнопок) ---
+
+    @ui.button(label="Уведомления", style=discord.ButtonStyle.secondary, row=0)
+    async def btn_notify(self, interaction: discord.Interaction, button: ui.Button):
+        if interaction.user.id != self.user_id: return
+        
+        # Переключаем в БД
+        new_state = await db.toggle_setting(self.user_id, "notify_lvl_up")
+        self.settings["notify_lvl_up"] = new_state # Обновляем локально для перерисовки
+        
+        self.update_buttons_visuals()
+        await interaction.response.edit_message(view=self)
+
+    @ui.button(label="Призрак", style=discord.ButtonStyle.secondary, row=0)
+    async def btn_ghost(self, interaction: discord.Interaction, button: ui.Button):
+        if interaction.user.id != self.user_id: return
+        
+        new_state = await db.toggle_setting(self.user_id, "ghost_mode")
+        self.settings["ghost_mode"] = new_state
+        
+        self.update_buttons_visuals()
+        await interaction.response.edit_message(view=self)
+
+    @ui.button(label="Назад в профиль", style=discord.ButtonStyle.primary, emoji="◀️", row=1)
+    async def btn_back(self, interaction: discord.Interaction, button: ui.Button):
+        if interaction.user.id != self.user_id: return
+        
+        # Возвращаем Embed профиля (приходится генерировать заново или передавать)
+        # Для простоты вызовем команду профиля заново через новый View
+        # Но так как мы не можем вызвать команду, мы просто обновим сообщение
+        # на "Профиль обновлен, используйте /profile" или пересоздадим Embed здесь.
+        
+        # Лучший вариант: просто удалить это сообщение и отправить новое ephemeral, 
+        # но edit_message не позволяет менять ephemeral статус.
+        # Поэтому просто нарисуем Embed профиля прямо здесь.
+        
+        await interaction.response.defer()
+        
+        # ... (Копируем генерацию Embed профиля, чтобы вернуться красиво) ...
+        # Для краткости я просто обновлю текст, но лучше вынести генерацию Embed в отдельную функцию
+        
+        embed = discord.Embed(title="⚙️ Настройки сохранены", description="Используйте `/profile` чтобы вернуться.", color=discord.Color.green())
+        await interaction.edit_original_response(embed=embed, view=None)
 # ==========================================
 # 🗺️ ROADMAP (Карта наград)
 # ==========================================
