@@ -276,10 +276,16 @@ class Leveling(commands.Cog):
             await interaction.followup.send(f"Произошла ошибка: {e}")
     @app_commands.command(name="profile", description="Посмотреть профиль")
     async def profile_slash(self, interaction: discord.Interaction):
-        user = interaction.user
-        log(f"[CMD] /profile вызван {user.name} (ID: {user.id})", level="DEBUG")
         try:
             await interaction.response.defer(thinking=True)
+        except discord.NotFound:
+            # Если мы уже опоздали (например, сервер спал), то ничего не поделаешь
+            return 
+        except Exception as e:
+            print(f"Error deferring interaction: {e}")
+            return
+        user = interaction.user
+        try:
             log("[Profile] Defer отправлен.", level="DEBUG")
             db_user = await db.find_user(user.id)
             if not db_user:
