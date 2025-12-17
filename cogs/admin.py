@@ -70,7 +70,7 @@ class LevelSelectView(ui.View):
 
 
 # --- 2. МОДАЛЬНОЕ ОКНО ТОЛЬКО ДЛЯ XP (РУЧНОЕ) ---
-class ManualXPModal(ui.Modal, title="Ручная корректировка XP"):
+class ManualXPModal(ui.Modal, title="Изменить XP"):
     def __init__(self, target_user):
         super().__init__()
         self.target_user = target_user
