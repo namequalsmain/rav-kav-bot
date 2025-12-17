@@ -274,11 +274,9 @@ class Leveling(commands.Cog):
             log(f"КРИТИЧЕСКАЯ ОШИБКА В КОМАНДЕ BATTLEPASS:\n{e}", level='ERROR')
             print(traceback.format_exc())
             await interaction.followup.send(f"Произошла ошибка: {e}")
-    @app_commands.command(name="profile", description="Статистика пользователя")
-    @app_commands.describe(user="Чей профиль посмотреть (пусто = свой)")
-    async def profile_cmd(self, interaction: discord.Interaction, user: discord.Member = None):
-        if not user:
-            user = interaction.user
+    @app_commands.command(name="profile", description="Посмотреть профиль")
+    async def profile_slash(self, interaction: discord.Interaction):
+        user = interaction.user
             
         await interaction.response.defer(thinking=True)
         
@@ -322,13 +320,8 @@ class Leveling(commands.Cog):
         embed.add_field(name="🎒 Инвентарь (Топ)", value=inv_str, inline=False)
         
         # Кнопка для просмотра полного инвентаря
-        # Мы можем добавить View, который открывает инвентарь ЭТОГО пользователя
-        # Но учти: кнопки инвентаря работают только для владельца.
-        # Поэтому добавим кнопку только если смотрят свой профиль.
-        view = None
-        if user.id == interaction.user.id:
-            from utils.ui import BattlepassView # Импортируем только View для кнопки
-            view = BattlepassView(user.id) 
+        from utils.ui import BattlepassView # Импортируем только View для кнопки
+        view = BattlepassView(user.id) 
             # (BattlepassView содержит кнопку "Рюкзак")
 
         await interaction.followup.send(embed=embed, view=view)
