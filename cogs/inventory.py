@@ -6,112 +6,107 @@ from discord.ext import commands
 from database import db
 from settings import ITEMS_DB
 
-# --- 1. МОДАЛКА ДЛЯ ИСПОЛЬЗОВАНИЯ ПРЕДМЕТА ЧЕРЕЗ КНОПКУ ---
-class UseItemModal(ui.Modal):
-    def __init__(self, item_id, item_name, needs_target):
-        super().__init__(title=f"Использовать: {item_name}")
+# --- 1. МЕНЮ ВЫБОРА ПОЛЬЗОВАТЕЛЯ (User Select) ---
+class TargetSelect(ui.UserSelect):
+    def __init__(self, item_id, item_name):
+        super().__init__(
+            placeholder=f"Выберите цель для {item_name}...",
+            min_values=1,
+            max_values=1
+        )
         self.item_id = item_id
-        self.needs_target = needs_target
 
-        if self.needs_target:
-            self.target_input = ui.TextInput(
-                label="Цель (Имя, Ник или ID)", 
-                placeholder="Например: namequalsmain",
-                required=True
-            )
-            self.add_item(self.target_input)
-        else:
-            self.confirm_input = ui.TextInput(
-                label="Подтверждение",
-                placeholder="Напишите 'да' для активации",
-                required=False,
-                default="да"
-            )
-            self.add_item(self.confirm_input)
-
-    async def on_submit(self, interaction: discord.Interaction):
-        # Чтобы не дублировать логику, мы вызываем метод use_logic из кога
-        # Но для этого нам нужно найти мембера по введенному тексту
-        target_member = None
+    async def callback(self, interaction: discord.Interaction):
+        # Получаем выбранного пользователя (это объект Member)
+        target = self.values[0]
         
-        if self.needs_target:
-            query = self.target_input.value.lower()
-            # Пытаемся найти пользователя на сервере
-            for m in interaction.guild.members:
-                if (str(m.id) == query) or (m.name.lower() == query) or (m.display_name.lower() == query):
-                    target_member = m
-                    break
-            
-            if not target_member:
-                return await interaction.response.send_message(f"❌ Не смог найти пользователя: {self.target_input.value}", ephemeral=True)
+        # Передаем управление логике
+        await InventoryLogic.process_use(interaction, self.item_id, target)
 
-        # Вызываем логику использования (которая описана ниже в InventoryLogic)
-        # Нам нужно получить доступ к экземпляру Inventory. 
-        # Трюк: мы импортируем логику или просто дублируем вызов метода. 
-        # Для простоты и надежности вызовем статический метод обработки.
-        
-        await InventoryLogic.process_use(interaction, self.item_id, target_member)
+class TargetSelectView(ui.View):
+    def __init__(self, item_id, item_name):
+        super().__init__(timeout=60)
+        self.add_item(TargetSelect(item_id, item_name))
+
+# --- 2. МЕНЮ ПОДТВЕРЖДЕНИЯ (Для предметов БЕЗ цели) ---
+class ConfirmView(ui.View):
+    def __init__(self, item_id, item_name):
+        super().__init__(timeout=60)
+        self.item_id = item_id
+        self.item_name = item_name
+
+    @ui.button(label="Активировать", style=discord.ButtonStyle.success, emoji="✅")
+    async def confirm(self, interaction: discord.Interaction, button: ui.Button):
+        await InventoryLogic.process_use(interaction, self.item_id, None)
+
+    @ui.button(label="Отмена", style=discord.ButtonStyle.secondary)
+    async def cancel(self, interaction: discord.Interaction, button: ui.Button):
+        await interaction.response.edit_message(content="❌ Отменено.", view=None)
 
 
-# --- 2. КНОПКА ПРЕДМЕТА ---
+# --- 3. КНОПКА ПРЕДМЕТА (В ГЛАВНОМ МЕНЮ) ---
 class InventoryItemButton(ui.Button):
     def __init__(self, item_id, amount, item_data):
         self.item_id = item_id
-        
-        # Формируем название кнопки: "🦶 Пинок (x5)"
         label = f"{item_data.get('name', item_id)} (x{amount})"
         emoji = item_data.get('emoji', '📦')
-        
         super().__init__(label=label, emoji=emoji, style=discord.ButtonStyle.secondary)
 
     async def callback(self, interaction: discord.Interaction):
-        # Список предметов, требующих цель
+        # Определяем, нужен ли таргет
         needs_target = self.item_id in ['kick', 'mute', 'rename', 'steal_xp', 'hook']
-        
         item_name = ITEMS_DB.get(self.item_id, {}).get('name', self.item_id)
-        await interaction.response.send_modal(UseItemModal(self.item_id, item_name, needs_target))
+
+        if needs_target:
+            # Если нужен таргет — отправляем меню выбора людей
+            view = TargetSelectView(self.item_id, item_name)
+            await interaction.response.send_message(
+                f"🎯 Выберите, на ком использовать **{item_name}**:", 
+                view=view, 
+                ephemeral=True
+            )
+        else:
+            # Если таргет не нужен — отправляем кнопку подтверждения
+            view = ConfirmView(self.item_id, item_name)
+            await interaction.response.send_message(
+                f"❓ Вы уверены, что хотите использовать **{item_name}**?", 
+                view=view, 
+                ephemeral=True
+            )
 
 
-# --- 3. ПАГИНАЦИЯ (СТРАНИЦЫ) ---
+# --- 4. ПАГИНАЦИЯ ИНВЕНТАРЯ ---
 class InventoryPaginationView(ui.View):
     def __init__(self, interaction, inventory_dict):
         super().__init__(timeout=180)
         self.interaction = interaction
         self.user_id = interaction.user.id
-        # Превращаем словарь {"kick": 5} в список [("kick", 5), ...]
         self.items = list(inventory_dict.items())
         self.page = 0
-        self.items_per_page = 20 # 4 ряда по 5 кнопок
-        
+        self.items_per_page = 20 
         self.update_buttons()
 
     def update_buttons(self):
         self.clear_items()
-        
-        # Срезаем список для текущей страницы
         start = self.page * self.items_per_page
         end = start + self.items_per_page
         current_items = self.items[start:end]
 
-        # Добавляем кнопки предметов
         for item_id, amount in current_items:
             item_data = ITEMS_DB.get(item_id, {})
             self.add_item(InventoryItemButton(item_id, amount, item_data))
 
-        # Добавляем навигацию, если предметов много
         if len(self.items) > self.items_per_page:
-            # Кнопка Назад
-            prev_btn = ui.Button(label="◀️ Назад", style=discord.ButtonStyle.primary, disabled=(self.page == 0), row=4)
+            total_pages = (len(self.items) - 1) // self.items_per_page + 1
+            
+            prev_btn = ui.Button(label="◀️", style=discord.ButtonStyle.primary, disabled=(self.page == 0), row=4)
             prev_btn.callback = self.prev_callback
             self.add_item(prev_btn)
 
-            # Счетчик страниц
-            total_pages = (len(self.items) - 1) // self.items_per_page + 1
-            counter_btn = ui.Button(label=f"Стр. {self.page + 1}/{total_pages}", style=discord.ButtonStyle.gray, disabled=True, row=4)
+            counter_btn = ui.Button(label=f"{self.page + 1}/{total_pages}", style=discord.ButtonStyle.gray, disabled=True, row=4)
             self.add_item(counter_btn)
 
-            # Кнопка Вперед
-            next_btn = ui.Button(label="Вперед ▶️", style=discord.ButtonStyle.primary, disabled=(end >= len(self.items)), row=4)
+            next_btn = ui.Button(label="▶️", style=discord.ButtonStyle.primary, disabled=(end >= len(self.items)), row=4)
             next_btn.callback = self.next_callback
             self.add_item(next_btn)
 
@@ -128,30 +123,32 @@ class InventoryPaginationView(ui.View):
         await interaction.response.edit_message(view=self)
 
 
-# --- 4. ВСПОМОГАТЕЛЬНЫЙ КЛАСС ЛОГИКИ (ЧТОБЫ НЕ ДУБЛИРОВАТЬ КОД) ---
+# --- 5. ЛОГИКА (БЕЗ ИЗМЕНЕНИЙ, НО ВАЖНАЯ) ---
 class InventoryLogic:
     @staticmethod
     async def process_use(interaction: discord.Interaction, item_id: str, target: discord.Member = None):
-        """Вся магия использования предмета тут"""
+        """Вся магия использования предмета"""
         
-        # 1. Проверки базы
+        # Чтобы не зависло, пока думает
+        await interaction.response.defer(thinking=True, ephemeral=True)
+
         user_data = await db.find_user(interaction.user.id)
         current_amount = user_data.get("inventory", {}).get(item_id, 0)
 
         if current_amount <= 0:
-            return await interaction.response.send_message(f"❌ Предмет закончился!", ephemeral=True)
+            return await interaction.followup.send(f"❌ Предмет закончился!")
 
+        # Проверка цели (UserSelect может вернуть бота, проверяем)
         if target and target.bot:
-            return await interaction.response.send_message("🤖 На роботов нельзя.", ephemeral=True)
+            return await interaction.followup.send("🤖 На роботов нельзя.")
         
-        # Щит цели
         if target:
             target_data = await db.find_user(target.id)
             if target_data and target_data.get('inventory', {}).get('shield', 0) > 0:
-                # Атака в щит
                 await db.add_item(target.id, 'shield', -1)
                 await db.add_item(interaction.user.id, item_id, -1)
-                return await interaction.response.send_message(f"🛡️ **{target.display_name}** отразил атаку щитом!", ephemeral=False)
+                # Отправляем в общий чат уведомление о щите (не ephemeral)
+                return await interaction.channel.send(f"🛡️ **{target.display_name}** отразил атаку **{interaction.user.display_name}** щитом!")
 
         msg = ""
         success = False
@@ -160,9 +157,12 @@ class InventoryLogic:
             # === HOOK ===
             if item_id == "hook":
                 if not interaction.user.voice or not interaction.user.voice.channel:
-                    return await interaction.response.send_message("❌ Зайдите в войс сами!", ephemeral=True)
+                    return await interaction.followup.send("❌ Зайдите в войс сами!")
                 if not target or not target.voice:
-                    return await interaction.response.send_message("❌ Цель не в войсе!", ephemeral=True)
+                    return await interaction.followup.send("❌ Цель не в войсе!")
+                if interaction.user.voice.channel == target.voice.channel:
+                    return await interaction.followup.send("❌ Вы уже в одной комнате.")
+                    
                 await target.move_to(interaction.user.voice.channel)
                 msg = f"🪝 **{interaction.user.name}** притянул **{target.display_name}**!"
                 success = True
@@ -174,7 +174,7 @@ class InventoryLogic:
                     msg = f"🦶 **{interaction.user.name}** кикнул **{target.display_name}**!"
                     success = True
                 else:
-                    return await interaction.response.send_message("❌ Цель не в войсе.", ephemeral=True)
+                    return await interaction.followup.send("❌ Цель не в войсе.")
 
             # === MUTE ===
             elif item_id == "mute":
@@ -182,9 +182,9 @@ class InventoryLogic:
                     await target.edit(mute=True)
                     msg = f"🤐 **{interaction.user.name}** замутил **{target.display_name}**!"
                     success = True
-                    asyncio.create_task(InventoryLogic.unmute_later(target)) # Фоновый размут
+                    asyncio.create_task(InventoryLogic.unmute_later(target))
                 else:
-                    return await interaction.response.send_message("❌ Цель не в войсе.", ephemeral=True)
+                    return await interaction.followup.send("❌ Цель не в войсе.")
 
             # === RENAME ===
             elif item_id == "rename":
@@ -204,7 +204,7 @@ class InventoryLogic:
                             await db.update_user(interaction.user.id, {"xp": user_data['xp'] + steal})
                             msg = f"🔪 **{interaction.user.name}** украл {steal} XP у **{target.display_name}**!"
                             success = True
-                        else: return await interaction.response.send_message("У него нет XP.", ephemeral=True)
+                        else: return await interaction.followup.send("У него нет XP.")
                     else:
                         fine = 300
                         await db.update_user(interaction.user.id, {"xp": max(0, user_data['xp'] - fine)})
@@ -217,25 +217,22 @@ class InventoryLogic:
                 msg = f"⚡ **{interaction.user.name}** получил +1000 XP!"
                 success = True
             
-            # === ПАССИВНЫЕ / КУПОНЫ ===
+            # === PASSIVE ===
             elif item_id in ["shield", "ticket_tg", "ticket_nitro", "color_ticket"]:
-                return await interaction.response.send_message(f"ℹ️ Предмет **{item_id}** работает пассивно или через админа.", ephemeral=True)
+                return await interaction.followup.send(f"ℹ️ Предмет **{item_id}** работает пассивно или через админа.")
 
             else:
-                 return await interaction.response.send_message("❓ Неизвестный предмет.", ephemeral=True)
+                 return await interaction.followup.send("❓ Неизвестный предмет.")
 
         except discord.Forbidden:
-             return await interaction.response.send_message("🚫 Нет прав (Move/Mute/Rename).", ephemeral=True)
+             return await interaction.followup.send("🚫 Нет прав (Move/Mute/Rename).")
         except Exception as e:
-             return await interaction.response.send_message(f"⚠️ Ошибка: {e}", ephemeral=True)
+             return await interaction.followup.send(f"⚠️ Ошибка: {e}")
 
         if success:
             await db.add_item(interaction.user.id, item_id, -1)
-            # Отвечаем, проверяя, был ли уже ответ (defer и т.д.)
-            if interaction.response.is_done():
-                await interaction.followup.send(msg)
-            else:
-                await interaction.response.send_message(msg)
+            # Отправляем сообщение
+            await interaction.followup.send(msg)
 
     @staticmethod
     async def unmute_later(member):
@@ -244,12 +241,11 @@ class InventoryLogic:
         except: pass
 
 
-# --- 5. КОГ INVENTORY ---
+# --- 6. КОГ INVENTORY ---
 class Inventory(commands.Cog):
     def __init__(self, bot):
         self.bot = bot
 
-    # Старое автодополнение (нужно для команды /use, если кто-то хочет писать руками)
     async def item_autocomplete(self, interaction: discord.Interaction, current: str):
         user = await db.find_user(interaction.user.id)
         if not user: return []
@@ -271,17 +267,15 @@ class Inventory(commands.Cog):
             return await interaction.response.send_message("❌ Профиль не найден.", ephemeral=True)
 
         inventory = user.get("inventory", {})
-        # Фильтруем пустые
         actual_items = {k: v for k, v in inventory.items() if v > 0}
 
         if not actual_items:
             return await interaction.response.send_message("🎒 Ваш рюкзак пуст.", ephemeral=True)
 
-        # Создаем View с кнопками
         view = InventoryPaginationView(interaction, actual_items)
-        await interaction.response.send_message("🎒 **Ваш Инвентарь:**\n*Нажмите на предмет, чтобы использовать*", view=view, ephemeral=True)
+        await interaction.response.send_message("🎒 **Ваш Инвентарь:**", view=view, ephemeral=True)
 
-    @app_commands.command(name="use", description="Использовать предмет (классический способ)")
+    @app_commands.command(name="use", description="Использовать предмет (вручную)")
     @app_commands.describe(item_id="Предмет", target="Цель")
     @app_commands.autocomplete(item_id=item_autocomplete)
     async def use_cmd(self, interaction: discord.Interaction, item_id: str, target: discord.Member = None):
